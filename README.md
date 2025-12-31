@@ -19,6 +19,8 @@ enemies currently attacking your party/raid members
 
 that are not targeting you
 
+<img width="251" height="65" alt="hudtankassist" src="https://github.com/user-attachments/assets/48fdce54-c61b-4f41-9161-9493b4adab9e" />
+
 provides a configurable macro that will - 
 
 optionally attempt taunt first
