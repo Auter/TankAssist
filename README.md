@@ -123,7 +123,7 @@ Bug reports are welcome.
 **Installation:**
 
 1. Extract the zip file.
-2. Ensure the resulting folder is named `Bagshui` and rename if needed.
+2. Ensure the resulting folder is named `TankAssist` and rename if needed.
 3. Move that folder to `[Path]\Interface\Addons`.
 
 **🤝 Credits**
