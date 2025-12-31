@@ -1,0 +1,11 @@
+## Interface: 11200
+## Title: TankAssist
+## Notes: Snap-attention and uncontrolled target helper for tank classes
+## Author: Auter (refactoring by Claude)
+## Version: 3.1.0
+## SavedVariables: TankAssistDB
+
+STA_Saved.lua
+STA_Combat.lua
+STA_UI.lua
+STA_Core.lua
