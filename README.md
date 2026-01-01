@@ -15,9 +15,7 @@ Supported classes:
 
 Displays a small HUD of:
 
-enemies currently attacking your party/raid members
-
-that are not targeting you
+enemies currently attacking your party/raid members that are not targeting you
 
 <img width="251" height="65" alt="hudtankassist" src="https://github.com/user-attachments/assets/48fdce54-c61b-4f41-9161-9493b4adab9e" />
 
@@ -25,9 +23,9 @@ provides a configurable macro that will -
 
 optionally attempt taunt first
 
-then casts your chosen snap spell
+if fail, then cast your chosen spell
 
-or only targets, or target+cast (your choice)
+option to only target, cast or target+cast (your choice)
 
 Lets you blacklist tanks / players you don’t want to pull from
 
