@@ -128,5 +128,6 @@ Bug reports are welcome.
 
 **🤝 Credits**
 
-Originally created by Auter
+Created by Auter
+
 Additional refactoring and iteration assisted via LLM-based tooling.
