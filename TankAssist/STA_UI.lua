@@ -16,7 +16,6 @@ STA_UI = {}
 local optionsFrame = nil
 local hudFrame = nil
 local hudEntries = {}
-local protectedButtons = {}
 local protectedContainer = nil
 
 -- Colors
@@ -98,7 +97,7 @@ function STA_UI:CreateOptionsFrame()
     local contentWidth = 355
     
     ------------------------------------------
-    -- PROTECTED PLAYERS SECTION
+    -- PROTECTED PLAYERS SECTION (Flow Layout with Scroll)
     ------------------------------------------
     yPos = self:AddSectionHeader(frame, "Protected Players", yPos, leftMargin)
     
@@ -112,17 +111,75 @@ function STA_UI:CreateOptionsFrame()
     desc:SetTextColor(0.7, 0.7, 0.7)
     yPos = yPos - 14
     
-    -- Protected players container
+    -- Protected players container (outer frame with backdrop)
+    local PROT_BOX_HEIGHT = 80
     local protCont = CreateFrame("Frame", "STA_ProtectedContainer", frame)
     protCont:ClearAllPoints()
     protCont:SetPoint("TOPLEFT", frame, "TOPLEFT", leftMargin, yPos)
     protCont:SetWidth(contentWidth)
-    protCont:SetHeight(60)
+    protCont:SetHeight(PROT_BOX_HEIGHT)
     protCont:SetBackdrop(BACKDROP_INNER)
     protCont:SetBackdropColor(0.05, 0.05, 0.05, 0.8)
     protCont:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     protectedContainer = protCont
-    yPos = yPos - 65
+    
+    -- Create scroll frame inside container
+    local scrollFrame = CreateFrame("ScrollFrame", "STA_ProtectedScrollFrame", protCont)
+    scrollFrame:ClearAllPoints()
+    scrollFrame:SetPoint("TOPLEFT", protCont, "TOPLEFT", 4, -4)
+    scrollFrame:SetPoint("BOTTOMRIGHT", protCont, "BOTTOMRIGHT", -20, 4)
+    
+    -- Content frame that holds all the name buttons (will be sized dynamically)
+    local scrollChild = CreateFrame("Frame", "STA_ProtectedScrollChild", scrollFrame)
+    scrollChild:SetWidth(contentWidth - 28)
+    scrollChild:SetHeight(1) -- Set dynamically based on content
+    scrollFrame:SetScrollChild(scrollChild)
+    
+    -- Create scrollbar
+    local scrollBar = CreateFrame("Slider", "STA_ProtectedScrollBar", protCont)
+    scrollBar:ClearAllPoints()
+    scrollBar:SetPoint("TOPRIGHT", protCont, "TOPRIGHT", -4, -6)
+    scrollBar:SetPoint("BOTTOMRIGHT", protCont, "BOTTOMRIGHT", -4, 6)
+    scrollBar:SetWidth(12)
+    scrollBar:SetOrientation("VERTICAL")
+    scrollBar:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
+    scrollBar:SetMinMaxValues(0, 1)
+    scrollBar:SetValue(0)
+    scrollBar:SetValueStep(1)
+    
+    -- Scrollbar background
+    local scrollBg = scrollBar:CreateTexture(nil, "BACKGROUND")
+    scrollBg:SetAllPoints(scrollBar)
+    scrollBg:SetTexture(0, 0, 0, 0.3)
+    
+    -- Link scrollbar to scroll frame
+    scrollBar:SetScript("OnValueChanged", function()
+        scrollFrame:SetVerticalScroll(this:GetValue())
+    end)
+    
+    -- Mouse wheel scrolling on the container
+    protCont:EnableMouseWheel(true)
+    protCont:SetScript("OnMouseWheel", function()
+        local current = scrollFrame:GetVerticalScroll()
+        local maxScroll = scrollBar:GetMinMaxValues()
+        local _, max = scrollBar:GetMinMaxValues()
+        local step = 20 -- pixels per scroll
+        
+        local newScroll = current - (arg1 * step)
+        if newScroll < 0 then newScroll = 0 end
+        if newScroll > max then newScroll = max end
+        
+        scrollFrame:SetVerticalScroll(newScroll)
+        scrollBar:SetValue(newScroll)
+    end)
+    
+    -- Store references for RefreshProtectedList
+    self.protectedScrollFrame = scrollFrame
+    self.protectedScrollChild = scrollChild
+    self.protectedScrollBar = scrollBar
+    self.protectedNameButtons = {} -- Pool of reusable name buttons
+    
+    yPos = yPos - (PROT_BOX_HEIGHT + 5)
     
     ------------------------------------------
     -- HUD OPTIONS SECTION (renamed from "Uncontrolled Targets HUD")
@@ -489,87 +546,169 @@ function STA_UI:AddDropdown(parent, label, yPos, leftMargin, width, options, get
 end
 
 --============================================================================
--- PROTECTED LIST REFRESH
--- Removed "Protected: (you)" text display
+-- PROTECTED LIST REFRESH (Flow Layout with Scroll)
+-- Names are laid out left-to-right, top-to-bottom inside the scroll child.
+-- Sorted alphabetically. Click toggles protection.
 --============================================================================
 
 function STA_UI:RefreshProtectedList()
     if not protectedContainer then return end
+    if not self.protectedScrollChild then return end
+    if not self.protectedScrollBar then return end
     
-    -- Clear old buttons
-    for _, btn in ipairs(protectedButtons) do
-        if btn and btn.Hide then btn:Hide() end
+    local scrollChild = self.protectedScrollChild
+    local scrollBar = self.protectedScrollBar
+    local scrollFrame = self.protectedScrollFrame
+    
+    -- Hide all existing buttons
+    if self.protectedNameButtons then
+        for _, btn in ipairs(self.protectedNameButtons) do
+            if btn and btn.Hide then btn:Hide() end
+        end
     end
-    protectedButtons = {}
+    self.protectedNameButtons = self.protectedNameButtons or {}
     
+    -- Get group members
     local members = {}
     if STA and STA.GetGroupMembers then
         members = STA:GetGroupMembers()
     end
     
-    if table.getn(members) == 0 then
-        local solo = protectedContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        solo:ClearAllPoints()
-        solo:SetPoint("CENTER", protectedContainer, "CENTER", 0, 0)
-        solo:SetText("(Solo - no group members)")
-        solo:SetTextColor(unpack(COLOR_DIM))
-        table.insert(protectedButtons, solo)
-    else
-        local maxCols = 4
-        local col = 0
-        local row = 0
-        local btnWidth = 85
-        local btnHeight = 18
-        local spacing = 2
+    -- Sort alphabetically by name
+    table.sort(members, function(a, b)
+        if a and b and a.name and b.name then
+            return strlower(a.name) < strlower(b.name)
+        end
+        return false
+    end)
+    
+    local numMembers = table.getn(members)
+    
+    -- Layout settings
+    local PADDING = 4
+    local BUTTON_HEIGHT = 16
+    local BUTTON_SPACING_X = 4
+    local BUTTON_SPACING_Y = 2
+    local MAX_WIDTH = scrollChild:GetWidth() - PADDING
+    
+    -- Handle solo case
+    if numMembers == 0 then
+        local btn = self.protectedNameButtons[1]
+        if not btn then
+            btn = CreateFrame("Button", nil, scrollChild)
+            btn:SetHeight(BUTTON_HEIGHT)
+            local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            text:ClearAllPoints()
+            text:SetPoint("LEFT", btn, "LEFT", 0, 0)
+            btn.text = text
+            self.protectedNameButtons[1] = btn
+        end
         
-        for _, member in ipairs(members) do
-            local btn = protectedButtons[col + row * maxCols + 1]
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", PADDING, -PADDING)
+        btn:SetWidth(MAX_WIDTH)
+        btn.memberName = nil
+        btn:SetScript("OnClick", nil)
+        if btn.text then
+            btn.text:SetText("(Solo - no group members)")
+            btn.text:SetTextColor(unpack(COLOR_DIM))
+        end
+        btn:Show()
+        
+        scrollChild:SetHeight(BUTTON_HEIGHT + PADDING * 2)
+        scrollBar:SetMinMaxValues(0, 0)
+        scrollBar:Hide()
+        return
+    end
+    
+    -- Flow layout: place buttons left-to-right, wrap to next row
+    local currentX = PADDING
+    local currentY = -PADDING
+    local rowHeight = BUTTON_HEIGHT + BUTTON_SPACING_Y
+    local maxRowY = currentY
+    
+    for i, member in ipairs(members) do
+        -- Get or create button
+        local btn = self.protectedNameButtons[i]
+        if not btn then
+            btn = CreateFrame("Button", nil, scrollChild)
+            btn:SetHeight(BUTTON_HEIGHT)
             
-            if not btn then
-                btn = CreateFrame("Button", nil, protectedContainer)
-                btn:SetWidth(btnWidth)
-                btn:SetHeight(btnHeight)
-                btn:ClearAllPoints()
-                btn:SetPoint("TOPLEFT", protectedContainer, "TOPLEFT",
-                    5 + col * (btnWidth + spacing),
-                    -5 - row * (btnHeight + spacing))
-                
-                local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                text:ClearAllPoints()
-                text:SetPoint("LEFT", btn, "LEFT", 2, 0)
-                text:SetJustifyH("LEFT")
-                btn.text = text
-                
-                btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-                btn:SetScript("OnClick", function()
-                    if this.memberName then
-                        STA_Saved:ToggleProtected(this.memberName)
-                        STA_UI:RefreshProtectedList()
-                    end
-                end)
-            end
+            local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            text:ClearAllPoints()
+            text:SetPoint("LEFT", btn, "LEFT", 4, 0)
+            text:SetPoint("RIGHT", btn, "RIGHT", -4, 0)
+            text:SetJustifyH("CENTER")
+            btn.text = text
             
-            btn.memberName = member.name
-            if btn.text then
-                btn.text:SetText(member.name or "?")
-                
-                local isProtected = STA_Saved:IsProtected(member.name)
-                if isProtected then
-                    btn.text:SetTextColor(unpack(COLOR_PROTECTED))
-                else
-                    btn.text:SetTextColor(unpack(COLOR_NORMAL))
+            btn:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+            btn:SetScript("OnClick", function()
+                if this.memberName then
+                    STA_Saved:ToggleProtected(this.memberName)
+                    STA_UI:RefreshProtectedList()
                 end
-            end
+            end)
             
-            btn:Show()
-            table.insert(protectedButtons, btn)
+            self.protectedNameButtons[i] = btn
+        end
+        
+        -- Set button content
+        btn.memberName = member.name
+        if btn.text then
+            btn.text:SetText(member.name or "?")
             
-            col = col + 1
-            if col >= maxCols then
-                col = 0
-                row = row + 1
+            local isProtected = STA_Saved:IsProtected(member.name)
+            if isProtected then
+                btn.text:SetTextColor(unpack(COLOR_PROTECTED))
+            else
+                btn.text:SetTextColor(unpack(COLOR_NORMAL))
             end
         end
+        
+        -- Measure text width to size button
+        local textWidth = btn.text:GetStringWidth() + 12 -- padding
+        if textWidth < 40 then textWidth = 40 end -- minimum width
+        if textWidth > MAX_WIDTH then textWidth = MAX_WIDTH end
+        btn:SetWidth(textWidth)
+        
+        -- Check if button fits on current row
+        if currentX + textWidth > MAX_WIDTH + PADDING and currentX > PADDING then
+            -- Wrap to next row
+            currentX = PADDING
+            currentY = currentY - rowHeight
+        end
+        
+        -- Position button
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", currentX, currentY)
+        btn:Show()
+        
+        -- Advance X position
+        currentX = currentX + textWidth + BUTTON_SPACING_X
+        
+        -- Track max Y for content height
+        if currentY - BUTTON_HEIGHT < maxRowY then
+            maxRowY = currentY - BUTTON_HEIGHT
+        end
+    end
+    
+    -- Set scroll child height based on content
+    local contentHeight = math.abs(maxRowY) + PADDING
+    if contentHeight < 1 then contentHeight = 1 end
+    scrollChild:SetHeight(contentHeight)
+    
+    -- Update scrollbar range
+    local visibleHeight = scrollFrame:GetHeight()
+    local maxScroll = contentHeight - visibleHeight
+    if maxScroll < 0 then maxScroll = 0 end
+    
+    scrollBar:SetMinMaxValues(0, maxScroll)
+    if maxScroll > 0 then
+        scrollBar:Show()
+    else
+        scrollBar:Hide()
+        scrollBar:SetValue(0)
+        scrollFrame:SetVerticalScroll(0)
     end
 end
 
